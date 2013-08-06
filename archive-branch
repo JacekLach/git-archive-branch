@@ -1,0 +1,58 @@
+#!/bin/bash
+set -eu
+
+usage() {
+  cat << EOF
+usage: $0 branch-name [remote-name]
+or     $0 --all [remote-name]
+
+Archive branch-name by renaming it to ",,branch-name" both locally and, if
+tracking origin, in remote repository.
+
+The ',,' prefix is chosen so that archived branches show up as very first in
+git branch list. '__' doesn't do that, '--' is illegal.
+
+If --all is provided, rename all branches that have been merged into the
+current branch, except the current branch.
+EOF
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+rename_branch() {
+  BRANCH=$1
+  NEW_BRANCH=",,$BRANCH"
+
+  ALLOWED_REMOTE=$2
+
+  if git config branch.$BRANCH.remote &> /dev/null; then
+    # BRANCH is a remote tracking branch
+    REMOTE=`git config branch.$BRANCH.remote`
+    if [[ "x$REMOTE" == "x$ALLOWED_REMOTE" ]] && \
+        git ls-remote --exit-code "$REMOTE" "$BRANCH" &> /dev/null; then
+      # remote branch still exists - rename it
+      git push "$REMOTE" :"$BRANCH"
+      git push "$REMOTE" "$BRANCH":"$NEW_BRANCH"
+    fi
+    git remote prune "$REMOTE"
+  fi
+
+  git branch -m "$BRANCH" "$NEW_BRANCH"
+}
+
+rename_all_branches() {
+  for BRANCH in \
+      `git branch --merged | tr -d ' ' | grep -v '\*' | grep -v '^,,'`; do
+    rename_branch "$BRANCH" "$1"
+  done
+}
+
+ALLOWED_REMOTE=${2:-origin}
+if [ "$1" == "--all" ]; then
+  rename_all_branches "$ALLOWED_REMOTE"
+else
+  rename_branch $1 $ALLOWED_REMOTE
+fi
